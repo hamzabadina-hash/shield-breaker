@@ -36,9 +36,9 @@ public class CleanGuiClient implements ClientModInitializer {
     private static final Map<UUID, Long> hitCooldowns = new HashMap<>();
     private static final long HIT_COOLDOWN_MS = 1000;
 
-    // -------------------------
-    // GUI Screen
-    // -------------------------
+    // Vanilla survival reach is 3.0, creative is 4.5
+    private static final double REACH = 3.0;
+
     public static class ShieldBreakerScreen extends Screen {
 
         public ShieldBreakerScreen() {
@@ -50,7 +50,6 @@ public class CleanGuiClient implements ClientModInitializer {
             int centerX = this.width / 2;
             int centerY = this.height / 2;
 
-            // Shield Breaker toggle button
             this.addDrawableChild(ButtonWidget.builder(
                 Text.literal("Shield Breaker: " + (modEnabled ? "§aON" : "§cOFF")),
                 button -> {
@@ -59,7 +58,6 @@ public class CleanGuiClient implements ClientModInitializer {
                 }
             ).dimensions(centerX - 100, centerY - 40, 200, 20).build());
 
-            // Stunt Slam toggle button
             this.addDrawableChild(ButtonWidget.builder(
                 Text.literal("Stunt Slam: " + (stuntSlamEnabled ? "§aON" : "§cOFF")),
                 button -> {
@@ -68,7 +66,6 @@ public class CleanGuiClient implements ClientModInitializer {
                 }
             ).dimensions(centerX - 100, centerY - 10, 200, 20).build());
 
-            // Close button
             this.addDrawableChild(ButtonWidget.builder(
                 Text.literal("§fClose"),
                 button -> this.close()
@@ -77,17 +74,14 @@ public class CleanGuiClient implements ClientModInitializer {
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Dark background overlay
             context.fill(0, 0, this.width, this.height, 0xAA000000);
 
-            // Panel background
             int panelX = this.width / 2 - 120;
             int panelY = this.height / 2 - 70;
             context.fill(panelX, panelY, panelX + 240, panelY + 140, 0xFF1A1A2E);
-            context.fill(panelX, panelY, panelX + 240, panelY + 2, 0xFF4FC3F7);   // top accent line
-            context.fill(panelX, panelY + 138, panelX + 240, panelY + 140, 0xFF4FC3F7); // bottom accent line
+            context.fill(panelX, panelY, panelX + 240, panelY + 2, 0xFF4FC3F7);
+            context.fill(panelX, panelY + 138, panelX + 240, panelY + 140, 0xFF4FC3F7);
 
-            // Title
             context.drawCenteredTextWithShadow(
                 this.textRenderer,
                 Text.literal("§b§lShield Breaker §7v1.2.0"),
@@ -96,7 +90,6 @@ public class CleanGuiClient implements ClientModInitializer {
                 0xFFFFFF
             );
 
-            // Stunt Slam description
             context.drawCenteredTextWithShadow(
                 this.textRenderer,
                 Text.literal("§7Stunt Slam: break shield §f+§7 follow-up hit"),
@@ -105,7 +98,6 @@ public class CleanGuiClient implements ClientModInitializer {
                 0xAAAAAA
             );
 
-            // Credits
             context.drawCenteredTextWithShadow(
                 this.textRenderer,
                 Text.literal("§8Credits: §6SG_Mafia_"),
@@ -119,13 +111,10 @@ public class CleanGuiClient implements ClientModInitializer {
 
         @Override
         public boolean shouldPause() {
-            return false; // keep game running while menu is open
+            return false;
         }
     }
 
-    // -------------------------
-    // Main Init
-    // -------------------------
     @Override
     public void onInitializeClient() {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
@@ -189,14 +178,19 @@ public class CleanGuiClient implements ClientModInitializer {
             Vec3d eyePos = player.getEyePos();
             Vec3d lookVec = player.getRotationVec(1.0f);
 
+            // Use vanilla survival reach of 3.0 blocks
             List<LivingEntity> nearby = client.world.getEntitiesByClass(
                 LivingEntity.class,
-                player.getBoundingBox().expand(3.5),
+                player.getBoundingBox().expand(REACH),
                 e -> e != player && e.isAlive()
             );
 
             for (LivingEntity enemy : nearby) {
                 UUID id = enemy.getUuid();
+
+                // Also check actual distance from eye position to be precise
+                double actualDist = enemy.getEyePos().distanceTo(eyePos);
+                if (actualDist > REACH + 0.5) continue; // +0.5 accounts for entity hitbox size
 
                 Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
                 double dot = lookVec.dotProduct(toEnemy);
@@ -216,7 +210,6 @@ public class CleanGuiClient implements ClientModInitializer {
 
                         if (stuntSlamEnabled) {
                             // === STUNT SLAM MODE ===
-                            // Step 1: swap to axe + break shield
                             player.getInventory().selectedSlot = axeSlot;
                             client.getNetworkHandler().sendPacket(
                                 new UpdateSelectedSlotC2SPacket(axeSlot)
@@ -224,7 +217,6 @@ public class CleanGuiClient implements ClientModInitializer {
                             client.interactionManager.attackEntity(player, enemy);
                             player.swingHand(Hand.MAIN_HAND);
 
-                            // Step 2: swap back to original weapon + follow-up hit
                             player.getInventory().selectedSlot = originalSlot;
                             client.getNetworkHandler().sendPacket(
                                 new UpdateSelectedSlotC2SPacket(originalSlot)
@@ -234,7 +226,6 @@ public class CleanGuiClient implements ClientModInitializer {
 
                         } else {
                             // === NORMAL MODE ===
-                            // Swap to axe, break shield, swap back
                             player.getInventory().selectedSlot = axeSlot;
                             client.getNetworkHandler().sendPacket(
                                 new UpdateSelectedSlotC2SPacket(axeSlot)
