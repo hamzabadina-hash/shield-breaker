@@ -4,6 +4,9 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
@@ -11,6 +14,7 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
@@ -23,13 +27,105 @@ import java.util.UUID;
 public class CleanGuiClient implements ClientModInitializer {
 
     private static KeyBinding toggleKey;
+    private static KeyBinding menuKey;
     private static boolean modEnabled = false;
-    private static boolean wasPressed = false;
+    private static boolean stuntSlamEnabled = false;
+    private static boolean wasTogglePressed = false;
+    private static boolean wasMenuPressed = false;
 
-    // Cooldown per enemy so we don't spam every tick
     private static final Map<UUID, Long> hitCooldowns = new HashMap<>();
     private static final long HIT_COOLDOWN_MS = 1000;
 
+    // -------------------------
+    // GUI Screen
+    // -------------------------
+    public static class ShieldBreakerScreen extends Screen {
+
+        public ShieldBreakerScreen() {
+            super(Text.literal("§bShield Breaker §7Settings"));
+        }
+
+        @Override
+        protected void init() {
+            int centerX = this.width / 2;
+            int centerY = this.height / 2;
+
+            // Shield Breaker toggle button
+            this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("Shield Breaker: " + (modEnabled ? "§aON" : "§cOFF")),
+                button -> {
+                    modEnabled = !modEnabled;
+                    button.setMessage(Text.literal("Shield Breaker: " + (modEnabled ? "§aON" : "§cOFF")));
+                }
+            ).dimensions(centerX - 100, centerY - 40, 200, 20).build());
+
+            // Stunt Slam toggle button
+            this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("Stunt Slam: " + (stuntSlamEnabled ? "§aON" : "§cOFF")),
+                button -> {
+                    stuntSlamEnabled = !stuntSlamEnabled;
+                    button.setMessage(Text.literal("Stunt Slam: " + (stuntSlamEnabled ? "§aON" : "§cOFF")));
+                }
+            ).dimensions(centerX - 100, centerY - 10, 200, 20).build());
+
+            // Close button
+            this.addDrawableChild(ButtonWidget.builder(
+                Text.literal("§fClose"),
+                button -> this.close()
+            ).dimensions(centerX - 50, centerY + 30, 100, 20).build());
+        }
+
+        @Override
+        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+            // Dark background overlay
+            context.fill(0, 0, this.width, this.height, 0xAA000000);
+
+            // Panel background
+            int panelX = this.width / 2 - 120;
+            int panelY = this.height / 2 - 70;
+            context.fill(panelX, panelY, panelX + 240, panelY + 140, 0xFF1A1A2E);
+            context.fill(panelX, panelY, panelX + 240, panelY + 2, 0xFF4FC3F7);   // top accent line
+            context.fill(panelX, panelY + 138, panelX + 240, panelY + 140, 0xFF4FC3F7); // bottom accent line
+
+            // Title
+            context.drawCenteredTextWithShadow(
+                this.textRenderer,
+                Text.literal("§b§lShield Breaker §7v1.2.0"),
+                this.width / 2,
+                this.height / 2 - 60,
+                0xFFFFFF
+            );
+
+            // Stunt Slam description
+            context.drawCenteredTextWithShadow(
+                this.textRenderer,
+                Text.literal("§7Stunt Slam: break shield §f+§7 follow-up hit"),
+                this.width / 2,
+                this.height / 2 + 18,
+                0xAAAAAA
+            );
+
+            // Credits
+            context.drawCenteredTextWithShadow(
+                this.textRenderer,
+                Text.literal("§8Credits: §6SG_Mafia_"),
+                this.width / 2,
+                this.height / 2 + 58,
+                0xFFFFFF
+            );
+
+            super.render(context, mouseX, mouseY, delta);
+        }
+
+        @Override
+        public boolean shouldPause() {
+            return false; // keep game running while menu is open
+        }
+    }
+
+    // -------------------------
+    // Main Init
+    // -------------------------
     @Override
     public void onInitializeClient() {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
@@ -39,28 +135,40 @@ public class CleanGuiClient implements ClientModInitializer {
             "category.cleangui"
         ));
 
+        menuKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.cleangui.menu",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_H,
+            "category.cleangui"
+        ));
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
             if (client.getNetworkHandler() == null) return;
 
-            // Toggle
-            if (toggleKey.isPressed() && !wasPressed) {
+            // Toggle mod with G
+            if (toggleKey.isPressed() && !wasTogglePressed) {
                 modEnabled = !modEnabled;
-                wasPressed = true;
+                wasTogglePressed = true;
                 client.player.sendMessage(
-                    net.minecraft.text.Text.literal("§7[§bClean GUI §7v1.2.0] §fShield Breaker: "
+                    Text.literal("§7[§bShield Breaker§7] "
                         + (modEnabled ? "§aON" : "§cOFF")
-                        + " §8| Credits: §6SG_Mafia_"),
+                        + (modEnabled && stuntSlamEnabled ? " §8| §eStunt Slam active" : "")),
                     true
                 );
             }
-            if (!toggleKey.isPressed()) wasPressed = false;
+            if (!toggleKey.isPressed()) wasTogglePressed = false;
+
+            // Open menu with H
+            if (menuKey.isPressed() && !wasMenuPressed) {
+                wasMenuPressed = true;
+                client.setScreen(new ShieldBreakerScreen());
+            }
+            if (!menuKey.isPressed()) wasMenuPressed = false;
 
             if (!modEnabled) return;
 
             long now = System.currentTimeMillis();
-
-            // Clean stale cooldowns
             hitCooldowns.entrySet().removeIf(e -> now - e.getValue() > HIT_COOLDOWN_MS * 2);
 
             ClientPlayerEntity player = client.player;
@@ -106,21 +214,39 @@ public class CleanGuiClient implements ClientModInitializer {
                     if (cooledDown) {
                         hitCooldowns.put(id, now);
 
-                        // Swap to axe instantly
-                        player.getInventory().selectedSlot = axeSlot;
-                        client.getNetworkHandler().sendPacket(
-                            new UpdateSelectedSlotC2SPacket(axeSlot)
-                        );
+                        if (stuntSlamEnabled) {
+                            // === STUNT SLAM MODE ===
+                            // Step 1: swap to axe + break shield
+                            player.getInventory().selectedSlot = axeSlot;
+                            client.getNetworkHandler().sendPacket(
+                                new UpdateSelectedSlotC2SPacket(axeSlot)
+                            );
+                            client.interactionManager.attackEntity(player, enemy);
+                            player.swingHand(Hand.MAIN_HAND);
 
-                        // Attack instantly same tick
-                        client.interactionManager.attackEntity(player, enemy);
-                        player.swingHand(Hand.MAIN_HAND);
+                            // Step 2: swap back to original weapon + follow-up hit
+                            player.getInventory().selectedSlot = originalSlot;
+                            client.getNetworkHandler().sendPacket(
+                                new UpdateSelectedSlotC2SPacket(originalSlot)
+                            );
+                            client.interactionManager.attackEntity(player, enemy);
+                            player.swingHand(Hand.MAIN_HAND);
 
-                        // Swap back instantly
-                        player.getInventory().selectedSlot = originalSlot;
-                        client.getNetworkHandler().sendPacket(
-                            new UpdateSelectedSlotC2SPacket(originalSlot)
-                        );
+                        } else {
+                            // === NORMAL MODE ===
+                            // Swap to axe, break shield, swap back
+                            player.getInventory().selectedSlot = axeSlot;
+                            client.getNetworkHandler().sendPacket(
+                                new UpdateSelectedSlotC2SPacket(axeSlot)
+                            );
+                            client.interactionManager.attackEntity(player, enemy);
+                            player.swingHand(Hand.MAIN_HAND);
+
+                            player.getInventory().selectedSlot = originalSlot;
+                            client.getNetworkHandler().sendPacket(
+                                new UpdateSelectedSlotC2SPacket(originalSlot)
+                            );
+                        }
 
                         break;
                     }
