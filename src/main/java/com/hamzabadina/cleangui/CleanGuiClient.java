@@ -79,7 +79,7 @@ public class CleanGuiClient implements ClientModInitializer {
                             new UpdateSelectedSlotC2SPacket(axeSlotPending)
                         );
 
-                        // Wait 1 tick (50ms) then attack
+                        // Wait then attack
                         state = SwapState.WAITING_TO_SWAP_BACK;
                         actionTime = now + randomDelay();
                     }
@@ -87,14 +87,18 @@ public class CleanGuiClient implements ClientModInitializer {
 
                 case WAITING_TO_SWAP_BACK -> {
                     if (now >= actionTime) {
-                        // Simulate left click attack via interact manager
-                        client.interactionManager.attackEntity(
-                            client.player,
-                            getClosestLookedAtEnemy(client)
-                        );
-                        client.player.swingHand(Hand.MAIN_HAND);
+                        LivingEntity target = getClosestLookedAtEnemy(client);
 
-                        // Swap back after random delay
+                        // Only attack if target is still valid and in range
+                        if (target != null) {
+                            client.interactionManager.attackEntity(
+                                client.player,
+                                target
+                            );
+                            client.player.swingHand(Hand.MAIN_HAND);
+                        }
+
+                        // Always swap back regardless of whether we attacked
                         client.player.getInventory().selectedSlot = originalSlotPending;
                         client.getNetworkHandler().sendPacket(
                             new UpdateSelectedSlotC2SPacket(originalSlotPending)
@@ -167,6 +171,8 @@ public class CleanGuiClient implements ClientModInitializer {
     }
 
     private LivingEntity getClosestLookedAtEnemy(MinecraftClient client) {
+        if (client.player == null || client.world == null) return null;
+
         Vec3d eyePos = client.player.getEyePos();
         Vec3d lookVec = client.player.getRotationVec(1.0f);
 
