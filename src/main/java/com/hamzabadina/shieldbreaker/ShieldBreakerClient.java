@@ -23,17 +23,20 @@ public class ShieldBreakerClient implements ClientModInitializer {
     private static boolean modEnabled = false;
     private static boolean wasPressed = false;
 
-    // Tracks enemies we already hit while they were shielding
-    // Cleared when they stop blocking so we can hit again next time
     private static final Set<UUID> alreadyHit = new HashSet<>();
+
+    // Swap state machine
+    private static boolean swapPending = false;
+    private static int originalSlotPending = -1;
+    private static long swapBackTime = -1;
 
     @Override
     public void onInitializeClient() {
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "key.shieldbreaker.toggle",
+            "key.cleangui.toggle",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_G,
-            "category.shieldbreaker"
+            "category.cleangui"
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -44,13 +47,24 @@ public class ShieldBreakerClient implements ClientModInitializer {
                 modEnabled = !modEnabled;
                 wasPressed = true;
                 client.player.sendMessage(
-                    net.minecraft.text.Text.literal("Shield Breaker: " + (modEnabled ? "§aON" : "§cOFF")),
+                    net.minecraft.text.Text.literal("§7[§bClean GUI §7v1.2.0] §fShield Breaker: " + (modEnabled ? "§aON" : "§cOFF") + " §8| Credits: §6SG_Mafia_"),
                     true
                 );
             }
             if (!toggleKey.isPressed()) wasPressed = false;
 
+            // Handle swap back after 100ms delay
+            if (swapPending && System.currentTimeMillis() >= swapBackTime) {
+                if (originalSlotPending >= 0 && originalSlotPending <= 8) {
+                    client.player.getInventory().selectedSlot = originalSlotPending;
+                }
+                swapPending = false;
+                originalSlotPending = -1;
+                swapBackTime = -1;
+            }
+
             if (!modEnabled) return;
+            if (swapPending) return; // Wait until swap back is done
 
             // Find axe in hotbar
             int axeSlot = -1;
@@ -65,7 +79,7 @@ public class ShieldBreakerClient implements ClientModInitializer {
             int currentSlot = client.player.getInventory().selectedSlot;
             if (currentSlot == axeSlot) return;
 
-            // Get nearby living entities
+            // Get nearby enemies
             java.util.List<LivingEntity> nearby = client.world.getEntitiesByClass(
                 LivingEntity.class,
                 client.player.getBoundingBox().expand(3.5),
@@ -81,15 +95,23 @@ public class ShieldBreakerClient implements ClientModInitializer {
                     && enemy.isBlocking();
 
                 if (isBlocking) {
-                    // Only hit once per shield raise
                     if (!alreadyHit.contains(id)) {
                         alreadyHit.add(id);
+
+                        // Step 1: visually swap to axe on client
+                        client.player.getInventory().selectedSlot = axeSlot;
+
+                        // Step 2: send packet to server to hit
                         final int finalAxeSlot = axeSlot;
                         final int finalOriginalSlot = currentSlot;
                         ClientPlayNetworking.send(new SwapAndHitPacket.Payload(finalAxeSlot, finalOriginalSlot));
+
+                        // Step 3: schedule swap back after 100ms
+                        swapPending = true;
+                        originalSlotPending = finalOriginalSlot;
+                        swapBackTime = System.currentTimeMillis() + 100;
                     }
                 } else {
-                    // Enemy stopped blocking — reset so we can hit again next raise
                     alreadyHit.remove(id);
                 }
             }
