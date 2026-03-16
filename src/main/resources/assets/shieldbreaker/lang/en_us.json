@@ -1,1 +1,4 @@
-{ "key.cleangui.toggle": "clean-gui", "category.cleangui": "Clean GUI" }
+{
+  "key.cleangui.toggle": "Toggle Shield Breaker",
+  "category.cleangui": "Clean GUI"
+}
