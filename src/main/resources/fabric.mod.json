@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "shieldbreaker",
+  "version": "1.0.0",
+  "name": "Shield Breaker",
+  "description": "Auto-swaps to axe when enemy holds a shield.",
+  "authors": ["hamzabadina-hash"],
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.hamzabadina.shieldbreaker.ShieldBreakerMod"],
+    "client": ["com.hamzabadina.shieldbreaker.ShieldBreakerClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.4"
+  }
+}
