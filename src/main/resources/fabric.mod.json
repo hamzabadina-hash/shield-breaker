@@ -5,7 +5,7 @@
   "name": "Clean GUI",
   "description": "A sleek client utility for precise, clean PvP interactions.",
   "authors": ["SG_Mafia_"],
-  "environment": "*",
+  "environment": "client",
   "entrypoints": {
     "main": ["com.hamzabadina.cleangui.CleanGuiMod"],
     "client": ["com.hamzabadina.cleangui.CleanGuiClient"]
@@ -15,8 +15,5 @@
     "fabricloader": ">=0.15.0",
     "fabric-api": "*",
     "minecraft": "~1.21.4"
-  },
-  "custom": {
-    "modmenu:clientsideOnly": false
   }
 }
