@@ -1,20 +1,22 @@
 package com.hamzabadina.cleangui;
 
-import com.hamzabadina.cleangui.network.SwapAndHitPacket;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -47,7 +49,9 @@ public class CleanGuiClient implements ClientModInitializer {
                 modEnabled = !modEnabled;
                 wasPressed = true;
                 client.player.sendMessage(
-                    net.minecraft.text.Text.literal("§7[§bClean GUI §7v1.2.0] §fShield Breaker: " + (modEnabled ? "§aON" : "§cOFF") + " §8| Credits: §6SG_Mafia_"),
+                    net.minecraft.text.Text.literal("§7[§bClean GUI §7v1.2.0] §fShield Breaker: "
+                        + (modEnabled ? "§aON" : "§cOFF")
+                        + " §8| Credits: §6SG_Mafia_"),
                     true
                 );
             }
@@ -56,7 +60,7 @@ public class CleanGuiClient implements ClientModInitializer {
             // Handle swap back after 50ms
             if (swapPending && System.currentTimeMillis() >= swapBackTime) {
                 if (originalSlotPending >= 0 && originalSlotPending <= 8) {
-                    client.player.getInventory().selectedSlot = originalSlotPending;
+                    setSlot(client, originalSlotPending);
                 }
                 swapPending = false;
                 originalSlotPending = -1;
@@ -66,33 +70,35 @@ public class CleanGuiClient implements ClientModInitializer {
             if (!modEnabled) return;
             if (swapPending) return;
 
+            ClientPlayerEntity player = client.player;
+
             // Find axe in hotbar
             int axeSlot = -1;
             for (int i = 0; i < 9; i++) {
-                if (client.player.getInventory().getStack(i).getItem() instanceof AxeItem) {
+                if (player.getInventory().getStack(i).getItem() instanceof AxeItem) {
                     axeSlot = i;
                     break;
                 }
             }
             if (axeSlot == -1) return;
 
-            int currentSlot = client.player.getInventory().selectedSlot;
+            int currentSlot = player.getInventory().selectedSlot;
             if (currentSlot == axeSlot) return;
 
             // Player look direction
-            Vec3d eyePos = client.player.getEyePos();
-            Vec3d lookVec = client.player.getRotationVec(1.0f);
+            Vec3d eyePos = player.getEyePos();
+            Vec3d lookVec = player.getRotationVec(1.0f);
 
-            java.util.List<LivingEntity> nearby = client.world.getEntitiesByClass(
+            List<LivingEntity> nearby = client.world.getEntitiesByClass(
                 LivingEntity.class,
-                client.player.getBoundingBox().expand(3.5),
-                e -> e != client.player && e.isAlive()
+                player.getBoundingBox().expand(3.5),
+                e -> e != player && e.isAlive()
             );
 
             for (LivingEntity enemy : nearby) {
                 UUID id = enemy.getUuid();
 
-                // Check if player is looking at enemy (~14 degree FOV)
+                // Check if looking at enemy
                 Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
                 double dot = lookVec.dotProduct(toEnemy);
                 boolean isLookingAt = dot > 0.97;
@@ -106,12 +112,16 @@ public class CleanGuiClient implements ClientModInitializer {
                     if (!alreadyHit.contains(id)) {
                         alreadyHit.add(id);
 
-                        client.player.getInventory().selectedSlot = axeSlot;
-
                         final int finalAxeSlot = axeSlot;
                         final int finalOriginalSlot = currentSlot;
-                        ClientPlayNetworking.send(new SwapAndHitPacket.Payload(finalAxeSlot, finalOriginalSlot));
 
+                        // Step 1: swap to axe via vanilla packet (works on any server)
+                        setSlot(client, finalAxeSlot);
+
+                        // Step 2: attack using vanilla attack key
+                        KeyBinding.onKeyPressed(client.options.attackKey.getDefaultKey());
+
+                        // Step 3: swap back after 50ms
                         swapPending = true;
                         originalSlotPending = finalOriginalSlot;
                         swapBackTime = System.currentTimeMillis() + 50;
@@ -121,5 +131,11 @@ public class CleanGuiClient implements ClientModInitializer {
                 }
             }
         });
+    }
+
+    // Sends a vanilla slot change packet — works on ANY server
+    private void setSlot(MinecraftClient client, int slot) {
+        client.player.getInventory().selectedSlot = slot;
+        client.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
     }
 }
