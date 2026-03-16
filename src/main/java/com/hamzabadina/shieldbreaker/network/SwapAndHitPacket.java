@@ -1,4 +1,4 @@
-package com.hamzabadina.shieldbreaker.network;
+package com.hamzabadina.cleangui.network;
 
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -11,7 +11,7 @@ import net.minecraft.util.Identifier;
 
 public class SwapAndHitPacket {
 
-    public static final Identifier ID = Identifier.of("shieldbreaker", "swap_hit");
+    public static final Identifier ID = Identifier.of("cleangui", "swap_hit");
 
     public record Payload(int axeSlot, int originalSlot) implements CustomPayload {
         public static final CustomPayload.Id<Payload> PACKET_ID = new CustomPayload.Id<>(ID);
