@@ -8,6 +8,7 @@ import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.item.AxeItem;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Box;
 
 public class SwapAndHitPacket {
 
@@ -36,19 +37,37 @@ public class SwapAndHitPacket {
             int originalSlot = payload.originalSlot();
 
             context.server().execute(() -> {
+                // Validate slots
                 if (axeSlot < 0 || axeSlot > 8) return;
+                if (originalSlot < 0 || originalSlot > 8) return;
                 if (!(player.getInventory().getStack(axeSlot).getItem() instanceof AxeItem)) return;
 
+                // Anti-abuse: make sure player is alive and not in spectator
+                if (!player.isAlive()) return;
+                if (player.isSpectator()) return;
+
+                // Swap to axe
                 player.getInventory().selectedSlot = axeSlot;
+
+                // Find closest enemy the player is looking at within 3.5 blocks
+                net.minecraft.util.math.Vec3d eyePos = player.getEyePos();
+                net.minecraft.util.math.Vec3d lookVec = player.getRotationVec(1.0f);
 
                 player.getWorld().getEntitiesByClass(
                     net.minecraft.entity.LivingEntity.class,
-                    player.getBoundingBox().expand(3.5),
-                    e -> e != player && e.isAlive()
+                    new Box(eyePos, eyePos).expand(3.5),
+                    e -> {
+                        if (e == player || !e.isAlive()) return false;
+                        // Server-side look check
+                        net.minecraft.util.math.Vec3d toEnemy = e.getEyePos().subtract(eyePos).normalize();
+                        double dot = lookVec.dotProduct(toEnemy);
+                        return dot > 0.93; // slightly wider on server to account for latency
+                    }
                 ).stream().findFirst().ifPresent(target -> {
                     player.attack(target);
                 });
 
+                // Swap back after 50ms (3 ticks)
                 player.getServer().execute(() -> {
                     player.getInventory().selectedSlot = originalSlot;
                 });
