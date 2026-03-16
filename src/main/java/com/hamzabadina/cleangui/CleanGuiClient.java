@@ -28,9 +28,17 @@ public class CleanGuiClient implements ClientModInitializer {
 
     private static final Set<UUID> alreadyHit = new HashSet<>();
 
-    private static boolean swapPending = false;
+    // State machine for the swap sequence
+    private enum SwapState { IDLE, WAITING_TO_HIT, WAITING_TO_SWAP_BACK }
+    private static SwapState state = SwapState.IDLE;
     private static int originalSlotPending = -1;
-    private static long swapBackTime = -1;
+    private static int axeSlotPending = -1;
+    private static long actionTime = -1;
+
+    // Mimics human reaction time randomness
+    private static long randomDelay() {
+        return 45 + (long)(Math.random() * 30); // 45-75ms random
+    }
 
     @Override
     public void onInitializeClient() {
@@ -43,8 +51,9 @@ public class CleanGuiClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
+            if (client.getNetworkHandler() == null) return;
 
-            // Toggle on/off
+            // Toggle
             if (toggleKey.isPressed() && !wasPressed) {
                 modEnabled = !modEnabled;
                 wasPressed = true;
@@ -57,84 +66,121 @@ public class CleanGuiClient implements ClientModInitializer {
             }
             if (!toggleKey.isPressed()) wasPressed = false;
 
-            // Handle swap back after 50ms
-            if (swapPending && System.currentTimeMillis() >= swapBackTime) {
-                if (originalSlotPending >= 0 && originalSlotPending <= 8) {
-                    setSlot(client, originalSlotPending);
-                }
-                swapPending = false;
-                originalSlotPending = -1;
-                swapBackTime = -1;
-            }
+            long now = System.currentTimeMillis();
 
-            if (!modEnabled) return;
-            if (swapPending) return;
+            // State machine
+            switch (state) {
 
-            ClientPlayerEntity player = client.player;
+                case WAITING_TO_HIT -> {
+                    if (now >= actionTime) {
+                        // Send slot change packet like a real player would
+                        client.player.getInventory().selectedSlot = axeSlotPending;
+                        client.getNetworkHandler().sendPacket(
+                            new UpdateSelectedSlotC2SPacket(axeSlotPending)
+                        );
 
-            // Find axe in hotbar
-            int axeSlot = -1;
-            for (int i = 0; i < 9; i++) {
-                if (player.getInventory().getStack(i).getItem() instanceof AxeItem) {
-                    axeSlot = i;
-                    break;
-                }
-            }
-            if (axeSlot == -1) return;
-
-            int currentSlot = player.getInventory().selectedSlot;
-            if (currentSlot == axeSlot) return;
-
-            // Player look direction
-            Vec3d eyePos = player.getEyePos();
-            Vec3d lookVec = player.getRotationVec(1.0f);
-
-            List<LivingEntity> nearby = client.world.getEntitiesByClass(
-                LivingEntity.class,
-                player.getBoundingBox().expand(3.5),
-                e -> e != player && e.isAlive()
-            );
-
-            for (LivingEntity enemy : nearby) {
-                UUID id = enemy.getUuid();
-
-                // Check if looking at enemy
-                Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
-                double dot = lookVec.dotProduct(toEnemy);
-                boolean isLookingAt = dot > 0.97;
-
-                boolean isBlocking =
-                    (enemy.getStackInHand(Hand.MAIN_HAND).isOf(Items.SHIELD) ||
-                     enemy.getStackInHand(Hand.OFF_HAND).isOf(Items.SHIELD))
-                    && enemy.isBlocking();
-
-                if (isBlocking && isLookingAt) {
-                    if (!alreadyHit.contains(id)) {
-                        alreadyHit.add(id);
-
-                        final int finalAxeSlot = axeSlot;
-                        final int finalOriginalSlot = currentSlot;
-
-                        // Swap to axe via vanilla packet
-                        setSlot(client, finalAxeSlot);
-
-                        // Attack using vanilla attack key
-                        KeyBinding.onKeyPressed(client.options.attackKey.getDefaultKey());
-
-                        // Swap back after 50ms
-                        swapPending = true;
-                        originalSlotPending = finalOriginalSlot;
-                        swapBackTime = System.currentTimeMillis() + 50;
+                        // Wait 1 tick (50ms) then attack
+                        state = SwapState.WAITING_TO_SWAP_BACK;
+                        actionTime = now + randomDelay();
                     }
-                } else {
-                    alreadyHit.remove(id);
+                }
+
+                case WAITING_TO_SWAP_BACK -> {
+                    if (now >= actionTime) {
+                        // Simulate left click attack via interact manager
+                        client.interactionManager.attackEntity(
+                            client.player,
+                            getClosestLookedAtEnemy(client)
+                        );
+                        client.player.swingHand(Hand.MAIN_HAND);
+
+                        // Swap back after random delay
+                        client.player.getInventory().selectedSlot = originalSlotPending;
+                        client.getNetworkHandler().sendPacket(
+                            new UpdateSelectedSlotC2SPacket(originalSlotPending)
+                        );
+
+                        state = SwapState.IDLE;
+                        originalSlotPending = -1;
+                        axeSlotPending = -1;
+                        actionTime = -1;
+                    }
+                }
+
+                case IDLE -> {
+                    if (!modEnabled) return;
+
+                    ClientPlayerEntity player = client.player;
+
+                    // Find axe in hotbar
+                    int axeSlot = -1;
+                    for (int i = 0; i < 9; i++) {
+                        if (player.getInventory().getStack(i).getItem() instanceof AxeItem) {
+                            axeSlot = i;
+                            break;
+                        }
+                    }
+                    if (axeSlot == -1) return;
+
+                    int currentSlot = player.getInventory().selectedSlot;
+                    if (currentSlot == axeSlot) return;
+
+                    Vec3d eyePos = player.getEyePos();
+                    Vec3d lookVec = player.getRotationVec(1.0f);
+
+                    List<LivingEntity> nearby = client.world.getEntitiesByClass(
+                        LivingEntity.class,
+                        player.getBoundingBox().expand(3.5),
+                        e -> e != player && e.isAlive()
+                    );
+
+                    for (LivingEntity enemy : nearby) {
+                        UUID id = enemy.getUuid();
+
+                        Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
+                        double dot = lookVec.dotProduct(toEnemy);
+                        boolean isLookingAt = dot > 0.97;
+
+                        boolean isBlocking =
+                            (enemy.getStackInHand(Hand.MAIN_HAND).isOf(Items.SHIELD) ||
+                             enemy.getStackInHand(Hand.OFF_HAND).isOf(Items.SHIELD))
+                            && enemy.isBlocking();
+
+                        if (isBlocking && isLookingAt) {
+                            if (!alreadyHit.contains(id)) {
+                                alreadyHit.add(id);
+
+                                axeSlotPending = axeSlot;
+                                originalSlotPending = currentSlot;
+
+                                // Random delay before starting (mimics human reaction)
+                                state = SwapState.WAITING_TO_HIT;
+                                actionTime = now + randomDelay();
+                            }
+                        } else {
+                            alreadyHit.remove(id);
+                        }
+                    }
                 }
             }
         });
     }
 
-    private void setSlot(MinecraftClient client, int slot) {
-        client.player.getInventory().selectedSlot = slot;
-        client.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+    private LivingEntity getClosestLookedAtEnemy(MinecraftClient client) {
+        Vec3d eyePos = client.player.getEyePos();
+        Vec3d lookVec = client.player.getRotationVec(1.0f);
+
+        return client.world.getEntitiesByClass(
+            LivingEntity.class,
+            client.player.getBoundingBox().expand(3.5),
+            e -> e != client.player && e.isAlive()
+        ).stream().filter(e -> {
+            Vec3d toEnemy = e.getEyePos().subtract(eyePos).normalize();
+            return lookVec.dotProduct(toEnemy) > 0.97;
+        }).min((a, b) -> {
+            double distA = a.squaredDistanceTo(client.player);
+            double distB = b.squaredDistanceTo(client.player);
+            return Double.compare(distA, distB);
+        }).orElse(null);
     }
 }
