@@ -53,7 +53,7 @@ public class CleanGuiClient implements ClientModInitializer {
             }
             if (!toggleKey.isPressed()) wasPressed = false;
 
-            // Handle swap back after 100ms
+            // Handle swap back after 50ms
             if (swapPending && System.currentTimeMillis() >= swapBackTime) {
                 if (originalSlotPending >= 0 && originalSlotPending <= 8) {
                     client.player.getInventory().selectedSlot = originalSlotPending;
@@ -92,7 +92,7 @@ public class CleanGuiClient implements ClientModInitializer {
             for (LivingEntity enemy : nearby) {
                 UUID id = enemy.getUuid();
 
-                // Check if player is looking at the enemy (dot product > 0.97 = ~14 degrees FOV)
+                // Check if player is looking at enemy (~14 degree FOV)
                 Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
                 double dot = lookVec.dotProduct(toEnemy);
                 boolean isLookingAt = dot > 0.97;
@@ -114,7 +114,7 @@ public class CleanGuiClient implements ClientModInitializer {
 
                         swapPending = true;
                         originalSlotPending = finalOriginalSlot;
-                        swapBackTime = System.currentTimeMillis() + 100;
+                        swapBackTime = System.currentTimeMillis() + 50;
                     }
                 } else {
                     alreadyHit.remove(id);
