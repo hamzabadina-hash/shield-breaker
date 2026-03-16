@@ -115,13 +115,13 @@ public class CleanGuiClient implements ClientModInitializer {
                         final int finalAxeSlot = axeSlot;
                         final int finalOriginalSlot = currentSlot;
 
-                        // Step 1: swap to axe via vanilla packet (works on any server)
+                        // Swap to axe via vanilla packet
                         setSlot(client, finalAxeSlot);
 
-                        // Step 2: attack using vanilla attack key
+                        // Attack using vanilla attack key
                         KeyBinding.onKeyPressed(client.options.attackKey.getDefaultKey());
 
-                        // Step 3: swap back after 50ms
+                        // Swap back after 50ms
                         swapPending = true;
                         originalSlotPending = finalOriginalSlot;
                         swapBackTime = System.currentTimeMillis() + 50;
@@ -133,7 +133,6 @@ public class CleanGuiClient implements ClientModInitializer {
         });
     }
 
-    // Sends a vanilla slot change packet — works on ANY server
     private void setSlot(MinecraftClient client, int slot) {
         client.player.getInventory().selectedSlot = slot;
         client.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
