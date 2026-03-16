@@ -3,13 +3,14 @@
   "id": "cleangui",
   "version": "1.2.0",
   "name": "Clean GUI",
-  "description": "Auto axe swap on shield with smooth delay. Credits: SG_Mafia_",
+  "description": "A sleek client utility for precise, clean PvP interactions.",
   "authors": ["SG_Mafia_"],
   "environment": "*",
   "entrypoints": {
-    "main": ["com.hamzabadina.shieldbreaker.ShieldBreakerMod"],
-    "client": ["com.hamzabadina.shieldbreaker.ShieldBreakerClient"]
+    "main": ["com.hamzabadina.cleangui.CleanGuiMod"],
+    "client": ["com.hamzabadina.cleangui.CleanGuiClient"]
   },
+  "icon": "assets/cleangui/icon.png",
   "depends": {
     "fabricloader": ">=0.15.0",
     "fabric-api": "*",
