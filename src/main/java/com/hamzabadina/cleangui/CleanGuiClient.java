@@ -15,9 +15,9 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
 
 public class CleanGuiClient implements ClientModInitializer {
@@ -26,7 +26,9 @@ public class CleanGuiClient implements ClientModInitializer {
     private static boolean modEnabled = false;
     private static boolean wasPressed = false;
 
-    private static final Set<UUID> alreadyHit = new HashSet<>();
+    // Cooldown per enemy: UUID -> timestamp of last hit
+    private static final Map<UUID, Long> hitCooldowns = new HashMap<>();
+    private static final long HIT_COOLDOWN_MS = 1200; // 1.2s cooldown per enemy before re-triggering
 
     // State machine for the swap sequence
     private enum SwapState { IDLE, WAITING_TO_HIT, WAITING_TO_SWAP_BACK }
@@ -34,10 +36,10 @@ public class CleanGuiClient implements ClientModInitializer {
     private static int originalSlotPending = -1;
     private static int axeSlotPending = -1;
     private static long actionTime = -1;
+    private static UUID targetUUID = null;
 
-    // Mimics human reaction time randomness
     private static long randomDelay() {
-        return 45 + (long)(Math.random() * 30); // 45-75ms random
+        return 40 + (long)(Math.random() * 20); // tightened to 40-60ms
     }
 
     @Override
@@ -68,18 +70,18 @@ public class CleanGuiClient implements ClientModInitializer {
 
             long now = System.currentTimeMillis();
 
-            // State machine
+            // Clean up stale cooldowns to avoid memory leak
+            hitCooldowns.entrySet().removeIf(e -> now - e.getValue() > HIT_COOLDOWN_MS * 2);
+
             switch (state) {
 
                 case WAITING_TO_HIT -> {
                     if (now >= actionTime) {
-                        // Send slot change packet like a real player would
                         client.player.getInventory().selectedSlot = axeSlotPending;
                         client.getNetworkHandler().sendPacket(
                             new UpdateSelectedSlotC2SPacket(axeSlotPending)
                         );
 
-                        // Wait then attack
                         state = SwapState.WAITING_TO_SWAP_BACK;
                         actionTime = now + randomDelay();
                     }
@@ -89,16 +91,22 @@ public class CleanGuiClient implements ClientModInitializer {
                     if (now >= actionTime) {
                         LivingEntity target = getClosestLookedAtEnemy(client);
 
-                        // Only attack if target is still valid and in range
                         if (target != null) {
                             client.interactionManager.attackEntity(
                                 client.player,
                                 target
                             );
                             client.player.swingHand(Hand.MAIN_HAND);
+                            // Record hit time so cooldown starts from actual hit
+                            hitCooldowns.put(target.getUuid(), now);
+                        } else {
+                            // Target gone — reset their cooldown so we try again immediately
+                            if (targetUUID != null) {
+                                hitCooldowns.remove(targetUUID);
+                            }
                         }
 
-                        // Always swap back regardless of whether we attacked
+                        // Always swap back
                         client.player.getInventory().selectedSlot = originalSlotPending;
                         client.getNetworkHandler().sendPacket(
                             new UpdateSelectedSlotC2SPacket(originalSlotPending)
@@ -108,6 +116,7 @@ public class CleanGuiClient implements ClientModInitializer {
                         originalSlotPending = -1;
                         axeSlotPending = -1;
                         actionTime = -1;
+                        targetUUID = null;
                     }
                 }
 
@@ -151,18 +160,21 @@ public class CleanGuiClient implements ClientModInitializer {
                             && enemy.isBlocking();
 
                         if (isBlocking && isLookingAt) {
-                            if (!alreadyHit.contains(id)) {
-                                alreadyHit.add(id);
+                            Long lastHit = hitCooldowns.get(id);
+                            boolean cooledDown = (lastHit == null || now - lastHit >= HIT_COOLDOWN_MS);
+
+                            if (cooledDown) {
+                                // Pre-emptively set cooldown to block double-triggers
+                                hitCooldowns.put(id, now);
 
                                 axeSlotPending = axeSlot;
                                 originalSlotPending = currentSlot;
+                                targetUUID = id;
 
-                                // Random delay before starting (mimics human reaction)
                                 state = SwapState.WAITING_TO_HIT;
                                 actionTime = now + randomDelay();
+                                break; // only handle one target per tick
                             }
-                        } else {
-                            alreadyHit.remove(id);
                         }
                     }
                 }
