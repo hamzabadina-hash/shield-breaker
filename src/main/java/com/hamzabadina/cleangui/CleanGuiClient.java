@@ -35,9 +35,14 @@ public class CleanGuiClient implements ClientModInitializer {
 
     private static final Map<UUID, Long> hitCooldowns = new HashMap<>();
     private static final long HIT_COOLDOWN_MS = 1000;
-
-    // Vanilla survival reach is 3.0, creative is 4.5
     private static final double REACH = 3.0;
+
+    // Stunt slam state
+    private enum StuntState { IDLE, WAITING_FOLLOWUP }
+    private static StuntState stuntState = StuntState.IDLE;
+    private static int stuntOriginalSlot = -1;
+    private static LivingEntity stuntTarget = null;
+    private static long stuntFollowupTime = -1;
 
     public static class ShieldBreakerScreen extends Screen {
 
@@ -155,12 +160,26 @@ public class CleanGuiClient implements ClientModInitializer {
             }
             if (!menuKey.isPressed()) wasMenuPressed = false;
 
-            if (!modEnabled) return;
-
             long now = System.currentTimeMillis();
             hitCooldowns.entrySet().removeIf(e -> now - e.getValue() > HIT_COOLDOWN_MS * 2);
 
             ClientPlayerEntity player = client.player;
+
+            // Handle stunt slam follow-up tick
+            if (stuntState == StuntState.WAITING_FOLLOWUP && now >= stuntFollowupTime) {
+                if (stuntTarget != null && stuntTarget.isAlive()) {
+                    // Now on original weapon - land the follow-up hit
+                    client.interactionManager.attackEntity(player, stuntTarget);
+                    player.swingHand(Hand.MAIN_HAND);
+                }
+                stuntState = StuntState.IDLE;
+                stuntTarget = null;
+                stuntOriginalSlot = -1;
+                stuntFollowupTime = -1;
+                return;
+            }
+
+            if (!modEnabled) return;
 
             // Find axe in hotbar
             int axeSlot = -1;
@@ -175,10 +194,12 @@ public class CleanGuiClient implements ClientModInitializer {
             int originalSlot = player.getInventory().selectedSlot;
             if (originalSlot == axeSlot) return;
 
+            // Don't trigger again while stunt slam is mid-sequence
+            if (stuntState == StuntState.WAITING_FOLLOWUP) return;
+
             Vec3d eyePos = player.getEyePos();
             Vec3d lookVec = player.getRotationVec(1.0f);
 
-            // Use vanilla survival reach of 3.0 blocks
             List<LivingEntity> nearby = client.world.getEntitiesByClass(
                 LivingEntity.class,
                 player.getBoundingBox().expand(REACH),
@@ -188,9 +209,8 @@ public class CleanGuiClient implements ClientModInitializer {
             for (LivingEntity enemy : nearby) {
                 UUID id = enemy.getUuid();
 
-                // Also check actual distance from eye position to be precise
                 double actualDist = enemy.getEyePos().distanceTo(eyePos);
-                if (actualDist > REACH + 0.5) continue; // +0.5 accounts for entity hitbox size
+                if (actualDist > REACH + 0.5) continue;
 
                 Vec3d toEnemy = enemy.getEyePos().subtract(eyePos).normalize();
                 double dot = lookVec.dotProduct(toEnemy);
@@ -210,19 +230,29 @@ public class CleanGuiClient implements ClientModInitializer {
 
                         if (stuntSlamEnabled) {
                             // === STUNT SLAM MODE ===
+
+                            // Step 1: swap TO axe and send packet
                             player.getInventory().selectedSlot = axeSlot;
                             client.getNetworkHandler().sendPacket(
                                 new UpdateSelectedSlotC2SPacket(axeSlot)
                             );
+
+                            // Step 2: hit with axe - breaks shield
                             client.interactionManager.attackEntity(player, enemy);
                             player.swingHand(Hand.MAIN_HAND);
 
+                            // Step 3: swap BACK to original weapon immediately
                             player.getInventory().selectedSlot = originalSlot;
                             client.getNetworkHandler().sendPacket(
                                 new UpdateSelectedSlotC2SPacket(originalSlot)
                             );
-                            client.interactionManager.attackEntity(player, enemy);
-                            player.swingHand(Hand.MAIN_HAND);
+
+                            // Step 4: schedule follow-up hit next tick (50ms)
+                            // so server has time to process the slot swap first
+                            stuntState = StuntState.WAITING_FOLLOWUP;
+                            stuntTarget = enemy;
+                            stuntOriginalSlot = originalSlot;
+                            stuntFollowupTime = now + 55;
 
                         } else {
                             // === NORMAL MODE ===
